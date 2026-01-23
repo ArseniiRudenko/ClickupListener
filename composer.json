@@ -1,0 +1,29 @@
+{
+    "name": "solarsuit/clickup_listener",
+    "description": "Listens to Clickup webhooks and creates updates Leantime task.",
+    "version": "0.1",
+    "homepage": "https://github.com/ArseniiRudenko/ClickupListener",
+    "screenshot": "/images/screenshot.png",
+    "authors": [
+        {
+            "name": "Arsenii Rudenko",
+            "email": "arsenii@solarsuit.games"
+        }
+    ],
+    "type": "plugin",
+    "keywords": [
+        "Clickup",
+        "Webhook",
+        "Listener",
+        "Integration"
+    ],
+    "license": "Apache-2.0",
+    "require": {
+        "ext-curl": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "Leantime\\Plugins\\ClickupListener\\": "/"
+        }
+    }
+}
