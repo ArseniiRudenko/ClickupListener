@@ -9,12 +9,18 @@ class ClickupListenerRepository
 {
 
     private Db $db;
+    private static bool $schemaEnsured = false;
+    private static ?array $ticketColumns = null;
 
 
     public function __construct()
     {
         // Get DB Instance
         $this->db = app(Db::class);
+        if (!self::$schemaEnsured) {
+            $this->ensureSchema();
+            self::$schemaEnsured = true;
+        }
     }
 
     public function setup(): void
@@ -38,6 +44,7 @@ class ClickupListenerRepository
             `id` int(11) NOT NULL AUTO_INCREMENT,
             `config_id` int(11) NOT NULL,
             `clickup_task_id` varchar(255) NOT NULL,
+            `parent_clickup_task_id` varchar(255) DEFAULT NULL,
             `ticket_id` int(11) NOT NULL,
             `created_at` datetime NOT NULL,
             `updated_at` datetime NOT NULL,
@@ -50,6 +57,8 @@ class ClickupListenerRepository
         $stmn->closeCursor();
 
         $this->ensureConfigColumns();
+        $this->ensureTaskMapColumns();
+        $this->ensureCommentMapTable();
     }
 
     public function teardown(): void
@@ -62,6 +71,11 @@ class ClickupListenerRepository
         $stmn->closeCursor();
 
         $sql = "DROP TABLE IF EXISTS `clickup_task_map`;";
+        $stmn = $pdo->prepare($sql);
+        $stmn->execute();
+        $stmn->closeCursor();
+
+        $sql = "DROP TABLE IF EXISTS `clickup_comment_map`;";
         $stmn = $pdo->prepare($sql);
         $stmn->execute();
         $stmn->closeCursor();
@@ -254,7 +268,7 @@ class ClickupListenerRepository
     {
         $pdo = $this->db->pdo();
         // @phpstan-ignore-next-line - table may not be visible to static analyzer
-        $sql = "SELECT id, config_id, clickup_task_id, ticket_id FROM clickup_task_map WHERE config_id = :config_id AND clickup_task_id = :clickup_task_id LIMIT 1";
+        $sql = "SELECT id, config_id, clickup_task_id, parent_clickup_task_id, ticket_id FROM clickup_task_map WHERE config_id = :config_id AND clickup_task_id = :clickup_task_id LIMIT 1";
         $st = $pdo->prepare($sql);
         $st->execute([':config_id' => $configId, ':clickup_task_id' => $clickupTaskId]);
         $row = $st->fetch(\PDO::FETCH_ASSOC);
@@ -263,18 +277,32 @@ class ClickupListenerRepository
         return $row ?: null;
     }
 
-    public function saveTaskMap(int $configId, string $clickupTaskId, int $ticketId): bool
+    public function getTaskMapsByParentClickupId(int $configId, string $parentClickupTaskId): array
+    {
+        $pdo = $this->db->pdo();
+        // @phpstan-ignore-next-line - table may not be visible to static analyzer
+        $sql = "SELECT id, config_id, clickup_task_id, parent_clickup_task_id, ticket_id FROM clickup_task_map WHERE config_id = :config_id AND parent_clickup_task_id = :parent_clickup_task_id";
+        $st = $pdo->prepare($sql);
+        $st->execute([':config_id' => $configId, ':parent_clickup_task_id' => $parentClickupTaskId]);
+        $rows = $st->fetchAll(\PDO::FETCH_ASSOC);
+        $st->closeCursor();
+
+        return $rows ?: [];
+    }
+
+    public function saveTaskMap(int $configId, string $clickupTaskId, int $ticketId, ?string $parentClickupTaskId = null): bool
     {
         $pdo = $this->db->pdo();
         $now = date('Y-m-d H:i:s');
         // @phpstan-ignore-next-line - table may not be visible to static analyzer
-        $sql = "INSERT INTO clickup_task_map (config_id, clickup_task_id, ticket_id, created_at, updated_at)
-                VALUES (:config_id, :clickup_task_id, :ticket_id, :created_at, :updated_at)
-                ON DUPLICATE KEY UPDATE ticket_id = VALUES(ticket_id), updated_at = VALUES(updated_at)";
+        $sql = "INSERT INTO clickup_task_map (config_id, clickup_task_id, parent_clickup_task_id, ticket_id, created_at, updated_at)
+                VALUES (:config_id, :clickup_task_id, :parent_clickup_task_id, :ticket_id, :created_at, :updated_at)
+                ON DUPLICATE KEY UPDATE ticket_id = VALUES(ticket_id), parent_clickup_task_id = VALUES(parent_clickup_task_id), updated_at = VALUES(updated_at)";
         $st = $pdo->prepare($sql);
         $ok = $st->execute([
             ':config_id' => $configId,
             ':clickup_task_id' => $clickupTaskId,
+            ':parent_clickup_task_id' => $parentClickupTaskId,
             ':ticket_id' => $ticketId,
             ':created_at' => $now,
             ':updated_at' => $now,
@@ -284,8 +312,125 @@ class ClickupListenerRepository
         return (bool)$ok;
     }
 
+    public function updateTaskMapParent(int $configId, string $clickupTaskId, ?string $parentClickupTaskId): bool
+    {
+        $pdo = $this->db->pdo();
+        $now = date('Y-m-d H:i:s');
+        // @phpstan-ignore-next-line - table may not be visible to static analyzer
+        $sql = "UPDATE clickup_task_map SET parent_clickup_task_id = :parent_clickup_task_id, updated_at = :updated_at WHERE config_id = :config_id AND clickup_task_id = :clickup_task_id LIMIT 1";
+        $st = $pdo->prepare($sql);
+        $ok = $st->execute([
+            ':parent_clickup_task_id' => $parentClickupTaskId,
+            ':updated_at' => $now,
+            ':config_id' => $configId,
+            ':clickup_task_id' => $clickupTaskId,
+        ]);
+        $st->closeCursor();
+
+        return (bool)$ok;
+    }
+
+    public function getCommentMapByClickupId(int $configId, string $clickupCommentId): ?array
+    {
+        $pdo = $this->db->pdo();
+        // @phpstan-ignore-next-line - table may not be visible to static analyzer
+        $sql = "SELECT id, config_id, clickup_comment_id, clickup_task_id, ticket_id, comment_id FROM clickup_comment_map WHERE config_id = :config_id AND clickup_comment_id = :clickup_comment_id LIMIT 1";
+        $st = $pdo->prepare($sql);
+        $st->execute([':config_id' => $configId, ':clickup_comment_id' => $clickupCommentId]);
+        $row = $st->fetch(\PDO::FETCH_ASSOC);
+        $st->closeCursor();
+
+        return $row ?: null;
+    }
+
+    public function saveCommentMap(int $configId, string $clickupCommentId, string $clickupTaskId, int $ticketId, int $commentId): bool
+    {
+        $pdo = $this->db->pdo();
+        $now = date('Y-m-d H:i:s');
+        // @phpstan-ignore-next-line - table may not be visible to static analyzer
+        $sql = "INSERT INTO clickup_comment_map (config_id, clickup_comment_id, clickup_task_id, ticket_id, comment_id, created_at)
+                VALUES (:config_id, :clickup_comment_id, :clickup_task_id, :ticket_id, :comment_id, :created_at)
+                ON DUPLICATE KEY UPDATE ticket_id = VALUES(ticket_id), comment_id = VALUES(comment_id)";
+        $st = $pdo->prepare($sql);
+        $ok = $st->execute([
+            ':config_id' => $configId,
+            ':clickup_comment_id' => $clickupCommentId,
+            ':clickup_task_id' => $clickupTaskId,
+            ':ticket_id' => $ticketId,
+            ':comment_id' => $commentId,
+            ':created_at' => $now,
+        ]);
+        $st->closeCursor();
+
+        return (bool)$ok;
+    }
+
+    public function getTicketColumns(): array
+    {
+        if (self::$ticketColumns !== null) {
+            return self::$ticketColumns;
+        }
+
+        if (!$this->tableExists('zp_tickets')) {
+            self::$ticketColumns = [];
+            return self::$ticketColumns;
+        }
+
+        $pdo = $this->db->pdo();
+        $columns = [];
+        $st = $pdo->prepare('SHOW COLUMNS FROM `zp_tickets`');
+        $st->execute();
+        $rows = $st->fetchAll(\PDO::FETCH_ASSOC);
+        $st->closeCursor();
+        foreach ($rows as $row) {
+            if (!empty($row['Field'])) {
+                $columns[$row['Field']] = true;
+            }
+        }
+
+        self::$ticketColumns = $columns;
+        return self::$ticketColumns;
+    }
+
+    public function deleteCommentMap(int $configId, string $clickupCommentId): bool
+    {
+        $pdo = $this->db->pdo();
+        // @phpstan-ignore-next-line - table may not be visible to static analyzer
+        $sql = "DELETE FROM clickup_comment_map WHERE config_id = :config_id AND clickup_comment_id = :clickup_comment_id";
+        $st = $pdo->prepare($sql);
+        $ok = $st->execute([':config_id' => $configId, ':clickup_comment_id' => $clickupCommentId]);
+        $st->closeCursor();
+
+        return (bool)$ok;
+    }
+
+    private function ensureSchema(): void
+    {
+        if ($this->tableExists('clickup_config')) {
+            $this->ensureConfigColumns();
+        }
+        if ($this->tableExists('clickup_task_map')) {
+            $this->ensureTaskMapColumns();
+        }
+        $this->ensureCommentMapTable();
+    }
+
+    private function tableExists(string $table): bool
+    {
+        $pdo = $this->db->pdo();
+        $st = $pdo->prepare('SHOW TABLES LIKE :table');
+        $st->execute([':table' => $table]);
+        $exists = $st->fetch(\PDO::FETCH_NUM) !== false;
+        $st->closeCursor();
+
+        return $exists;
+    }
+
     private function ensureConfigColumns(): void
     {
+        if (!$this->tableExists('clickup_config')) {
+            return;
+        }
         $pdo = $this->db->pdo();
         $columns = [];
         $st = $pdo->prepare("SHOW COLUMNS FROM `clickup_config`");
@@ -314,5 +459,51 @@ class ClickupListenerRepository
                 }
             }
         }
+    }
+
+    private function ensureTaskMapColumns(): void
+    {
+        if (!$this->tableExists('clickup_task_map')) {
+            return;
+        }
+        $pdo = $this->db->pdo();
+        $columns = [];
+        $st = $pdo->prepare("SHOW COLUMNS FROM `clickup_task_map`");
+        $st->execute();
+        $rows = $st->fetchAll(\PDO::FETCH_ASSOC);
+        $st->closeCursor();
+        foreach ($rows as $row) {
+            if (!empty($row['Field'])) {
+                $columns[$row['Field']] = true;
+            }
+        }
+
+        if (!isset($columns['parent_clickup_task_id'])) {
+            try {
+                $pdo->exec("ALTER TABLE `clickup_task_map` ADD COLUMN `parent_clickup_task_id` varchar(255) DEFAULT NULL");
+            } catch (\Throwable $e) {
+                Log::warning('ClickupListener: could not add column parent_clickup_task_id: '.$e->getMessage());
+            }
+        }
+    }
+
+    private function ensureCommentMapTable(): void
+    {
+        $pdo = $this->db->pdo();
+        $sql = "CREATE TABLE IF NOT EXISTS `clickup_comment_map` (
+            `id` int(11) NOT NULL AUTO_INCREMENT,
+            `config_id` int(11) NOT NULL,
+            `clickup_comment_id` varchar(255) NOT NULL,
+            `clickup_task_id` varchar(255) NOT NULL,
+            `ticket_id` int(11) NOT NULL,
+            `comment_id` int(11) NOT NULL,
+            `created_at` datetime NOT NULL,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uniq_config_comment` (`config_id`, `clickup_comment_id`),
+            KEY `idx_ticket_id` (`ticket_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;";
+        $stmn = $pdo->prepare($sql);
+        $stmn->execute();
+        $stmn->closeCursor();
     }
 }
