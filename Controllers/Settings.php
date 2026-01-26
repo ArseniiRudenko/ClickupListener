@@ -7,10 +7,12 @@ use Leantime\Core\Controller\Controller;
 use Symfony\Component\HttpFoundation\Response;
 use Leantime\Plugins\ClickupListener\Repositories\ClickupListenerRepository;
 use Leantime\Core\Controller\Frontcontroller;
+use Leantime\Domain\Projects\Repositories\Projects as ProjectsRepository;
 
 class Settings extends Controller
 {
     private ClickupListenerRepository $repository;
+    private ProjectsRepository $projectsRepository;
 
     /**
      * init
@@ -20,6 +22,7 @@ class Settings extends Controller
     public function init(ClickupListenerRepository $repository): void
     {
         $this->repository = $repository;
+        $this->projectsRepository = app()->make(ProjectsRepository::class);
     }
 
     /**
@@ -192,5 +195,35 @@ class Settings extends Controller
         }
 
         return new Response(json_encode($result), ($result['success'] ? 200 : 400), ['Content-Type' => 'application/json']);
+    }
+
+    /**
+     * projectName - returns project name for a project id (POST: project_id)
+     */
+    public function projectName(array $params): Response
+    {
+        $req = $this->incomingRequest->request;
+        $projectId = (int)$req->get('project_id', 0);
+        if ($projectId <= 0) {
+            return new Response(json_encode(['success' => false, 'message' => 'Project ID is required']), 400, ['Content-Type' => 'application/json']);
+        }
+
+        try {
+            $project = $this->projectsRepository->getProject($projectId);
+            if (!$project) {
+                return new Response(json_encode(['success' => false, 'message' => 'Project not found']), 404, ['Content-Type' => 'application/json']);
+            }
+
+            $name = is_array($project) ? ($project['name'] ?? '') : ($project->name ?? '');
+            $name = trim((string)$name);
+            if ($name === '') {
+                return new Response(json_encode(['success' => false, 'message' => 'Project name not available']), 404, ['Content-Type' => 'application/json']);
+            }
+
+            return new Response(json_encode(['success' => true, 'name' => $name]), 200, ['Content-Type' => 'application/json']);
+        } catch (\Throwable $e) {
+            Log::error('Failed to fetch project name: '.$e->getMessage());
+            return new Response(json_encode(['success' => false, 'message' => 'Error: '.$e->getMessage()]), 500, ['Content-Type' => 'application/json']);
+        }
     }
 }

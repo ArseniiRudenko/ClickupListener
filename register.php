@@ -9,6 +9,7 @@ EventDispatcher::add_filter_listener('leantime.core.*.publicActions', 'publicAct
 
 function publicActionsFilterClickUp($payload, $params){
     $payload[] = "ClickupListener.hook";
+    $payload[] = "ClickupListener.settings.projectName";
     return $payload;
 }
 

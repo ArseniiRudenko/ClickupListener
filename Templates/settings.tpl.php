@@ -44,7 +44,10 @@
                             <td><?php echo $id; ?></td>
                             <td><?php echo $webhookId; ?></td>
                             <td>
-                                <input type="number" id="project-input-<?php echo $id; ?>" class="form-control" value="<?php echo $projectId; ?>" />
+                                <div class="clickup-project-field">
+                                    <input type="number" id="project-input-<?php echo $id; ?>" class="form-control" value="<?php echo $projectId; ?>" />
+                                    <span class="clickup-project-name" id="project-name-<?php echo $id; ?>" data-loaded="0"></span>
+                                </div>
                             </td>
                             <td>
                                 <input type="text" id="tag-input-<?php echo $id; ?>" class="form-control" value="<?php echo $tag; ?>" />
@@ -77,7 +80,10 @@
 
             <div class="form-group">
                 <label class="control-label" for="project-id">Leantime project ID</label>
-                <input type="number" name="project_id" id="project-id" class="form-control" placeholder="e.g. 12" required />
+                <div class="clickup-project-field">
+                    <input type="number" name="project_id" id="project-id" class="form-control" placeholder="e.g. 12" required />
+                    <span class="clickup-project-name" id="project-name-new" data-loaded="0"></span>
+                </div>
             </div>
 
             <div class="form-group">
@@ -102,6 +108,7 @@
     const btn = document.getElementById('test-project');
     const spinner = document.getElementById('test-spinner');
     const resultDiv = document.getElementById('test-result');
+    const nameCache = new Map();
 
     function show(message, success) {
         resultDiv.innerHTML = '';
@@ -148,6 +155,68 @@
     }
 
     if (btn) btn.addEventListener('click', testConn);
+
+    async function fetchProjectName(projectId) {
+        if (!projectId) return null;
+        const cached = nameCache.get(projectId);
+        if (cached) return cached;
+        const body = new URLSearchParams();
+        body.append('project_id', projectId);
+        try {
+            const resp = await fetch('/ClickupListener/settings/projectName', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: body.toString()
+            });
+            const json = await resp.json().catch(() => null);
+            if (resp.ok && json && json.success && json.name) {
+                nameCache.set(projectId, json.name);
+                return json.name;
+            }
+        } catch (err) {
+            return null;
+        }
+        return null;
+    }
+
+    async function updateProjectName(inputEl, targetEl) {
+        if (!inputEl || !targetEl) return;
+        const projectId = inputEl.value.trim();
+        if (projectId === '') {
+            targetEl.textContent = '';
+            targetEl.dataset.loaded = '0';
+            return;
+        }
+        if (targetEl.dataset.loaded === '1' && targetEl.dataset.projectId === projectId) {
+            return;
+        }
+        targetEl.textContent = 'Loading...';
+        targetEl.dataset.loaded = '1';
+        targetEl.dataset.projectId = projectId;
+        const name = await fetchProjectName(projectId);
+        if (name) {
+            targetEl.textContent = name;
+        } else {
+            targetEl.textContent = 'Project not found';
+        }
+    }
+
+    function bindProjectField(inputId, nameId) {
+        const inputEl = document.getElementById(inputId);
+        const nameEl = document.getElementById(nameId);
+        if (!inputEl || !nameEl) return;
+        inputEl.addEventListener('change', () => updateProjectName(inputEl, nameEl));
+        inputEl.addEventListener('blur', () => updateProjectName(inputEl, nameEl));
+        if (inputEl.value.trim() !== '') {
+            updateProjectName(inputEl, nameEl);
+        }
+    }
+
+    bindProjectField('project-id', 'project-name-new');
+    document.querySelectorAll('[id^="project-input-"]').forEach(inputEl => {
+        const id = inputEl.id.replace('project-input-', '');
+        bindProjectField(inputEl.id, 'project-name-' + id);
+    });
 
     // Update and Delete handlers for rows
     function showRowMessage(rowId, message, success) {
@@ -247,3 +316,16 @@
 
 })();
 </script>
+
+<style>
+    .clickup-project-field {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .clickup-project-name {
+        font-size: 12px;
+        color: #666;
+        white-space: nowrap;
+    }
+</style>
