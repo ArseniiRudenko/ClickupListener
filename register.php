@@ -5,9 +5,9 @@ use Leantime\Core\Events\EventDispatcher;
 use Leantime\Domain\Plugins\Services\Registration;
 use Leantime\Plugins\AuditTrail\Controllers\UiController;
 
-EventDispatcher::add_filter_listener('leantime.core.*.publicActions', 'publicActionsFilter');
+EventDispatcher::add_filter_listener('leantime.core.*.publicActions', 'publicActionsFilterClickUp');
 
-function publicActionsFilter($payload, $params){
+function publicActionsFilterClickUp($payload, $params){
     $payload[] = "ClickupListener.hook";
     return $payload;
 }
