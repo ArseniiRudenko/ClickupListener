@@ -67,6 +67,17 @@
 
         <h3 class="widgettitle title-light">Add webhook configuration</h3>
 
+        <div class="well" style="margin-bottom: 16px;">
+            <strong>How to set up the integration</strong>
+            <ol style="margin-top: 8px;">
+                <li>Create a ClickUp webhook for your space/folder/list and copy its Webhook ID.</li>
+                <li>Optional: set a webhook secret in ClickUp and paste it here to enable signature verification.</li>
+                <li>Enter the Leantime project ID you want to sync into and confirm the project name shown.</li>
+                <li>Optional: add a tag that will be applied to created tickets.</li>
+                <li>Save the configuration, then send a test webhook from ClickUp.</li>
+            </ol>
+        </div>
+
         <form method="post" action="/ClickupListener/settings" class="row-fluid" id="clickup-config-form">
             <div class="form-group">
                 <label class="control-label" for="webhook-id">Webhook ID</label>

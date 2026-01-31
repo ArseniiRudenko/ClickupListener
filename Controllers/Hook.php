@@ -148,34 +148,7 @@ class Hook extends Controller
         }
         if ($map !== null) {
             $ticketId = (int)($map['ticket_id'] ?? 0);
-            $updates = [];
-            if ($headline !== '') {
-                $updates['headline'] = $headline;
-            }
-            if ($description !== '') {
-                $updates['description'] = $description;
-            }
-            if ($statusId !== null) {
-                $updates['status'] = $statusId;
-            }
-            if ($priorityId !== null) {
-                $updates['priority'] = $priorityId;
-            }
-            if (!empty($customFieldUpdates)) {
-                foreach ($customFieldUpdates as $key => $value) {
-                    if (!array_key_exists($key, $updates)) {
-                        $updates[$key] = $value;
-                    }
-                }
-            }
-            if ($tag !== '' && $ticketId > 0) {
-                $existing = $this->ticketsRepository->getTicket($ticketId);
-                $currentTags = is_object($existing) ? (string)($existing->tags ?? '') : '';
-                $mergedTags = $this->mergeTags($currentTags, $tag);
-                if ($mergedTags !== $currentTags) {
-                    $updates['tags'] = $mergedTags;
-                }
-            }
+            $updates = $this->buildTicketUpdates($ticketId, $headline, $description, $statusId, $priorityId, $customFieldUpdates, $tag);
 
             if (!empty($updates) && $ticketId > 0) {
                 $this->ticketsRepository->patchTicket($ticketId, $updates);
@@ -185,6 +158,24 @@ class Hook extends Controller
                 $this->repository->updateTaskMapParent((int)$matched['id'], $taskId, $parentClickupId !== '' ? $parentClickupId : null);
             }
         } else {
+            $ticketId = 0;
+            if ($headline !== '' && $tag !== '') {
+                $existingTicketId = $this->repository->findTicketIdByHeadlineAndTags($projectId, $headline, $this->splitTags($tag));
+                if ($existingTicketId !== null && $existingTicketId > 0) {
+                    $ticketId = $existingTicketId;
+                    $updates = $this->buildTicketUpdates($ticketId, $headline, $description, $statusId, $priorityId, $customFieldUpdates, $tag);
+                    if (!empty($updates)) {
+                        $this->ticketsRepository->patchTicket($ticketId, $updates);
+                    }
+                    $this->repository->saveTaskMap((int)$matched['id'], $taskId, $ticketId, $hasParentField ? ($parentClickupId !== '' ? $parentClickupId : null) : null);
+                }
+            }
+
+            if ($ticketId > 0) {
+                $this->syncParentLinks((int)$matched['id'], $taskId, $ticketId, $parentClickupId);
+                return new Response(json_encode(['success' => true]), 200, ['Content-Type' => 'application/json']);
+            }
+
             $tags = $tag !== '' ? $this->mergeTags('', $tag) : '';
             $values = [
                 'headline' => $headline,
@@ -1028,5 +1019,53 @@ class Hook extends Controller
         });
         $merged = array_values(array_unique(array_merge($existing, $incoming)));
         return implode(',', $merged);
+    }
+
+    private function splitTags(string $tags): array
+    {
+        return array_values(array_filter(array_map('trim', explode(',', $tags)), static function ($tag) {
+            return $tag !== '';
+        }));
+    }
+
+    private function buildTicketUpdates(
+        int $ticketId,
+        string $headline,
+        string $description,
+        ?int $statusId,
+        ?int $priorityId,
+        array $customFieldUpdates,
+        string $tag
+    ): array {
+        $updates = [];
+        if ($headline !== '') {
+            $updates['headline'] = $headline;
+        }
+        if ($description !== '') {
+            $updates['description'] = $description;
+        }
+        if ($statusId !== null) {
+            $updates['status'] = $statusId;
+        }
+        if ($priorityId !== null) {
+            $updates['priority'] = $priorityId;
+        }
+        if (!empty($customFieldUpdates)) {
+            foreach ($customFieldUpdates as $key => $value) {
+                if (!array_key_exists($key, $updates)) {
+                    $updates[$key] = $value;
+                }
+            }
+        }
+        if ($tag !== '' && $ticketId > 0) {
+            $existing = $this->ticketsRepository->getTicket($ticketId);
+            $currentTags = is_object($existing) ? (string)($existing->tags ?? '') : '';
+            $mergedTags = $this->mergeTags($currentTags, $tag);
+            if ($mergedTags !== $currentTags) {
+                $updates['tags'] = $mergedTags;
+            }
+        }
+
+        return $updates;
     }
 }

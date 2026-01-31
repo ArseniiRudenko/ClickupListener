@@ -264,6 +264,51 @@ class ClickupListenerRepository
         return $row !== false;
     }
 
+    public function findTicketIdByHeadlineAndTags(int $projectId, string $headline, array $tags): ?int
+    {
+        $headline = trim($headline);
+        if ($projectId <= 0 || $headline === '') {
+            return null;
+        }
+
+        $tags = array_values(array_filter(array_map('trim', $tags), static function ($tag) {
+            return $tag !== '';
+        }));
+        if (empty($tags)) {
+            return null;
+        }
+
+        $pdo = $this->db->pdo();
+        $conditions = [];
+        $params = [
+            ':project_id' => $projectId,
+            ':headline' => $headline,
+        ];
+
+        foreach ($tags as $index => $tag) {
+            $key = ':tag'.$index;
+            $conditions[] = "FIND_IN_SET($key, zp_tickets.tags)";
+            $params[$key] = $tag;
+        }
+
+        $sql = "SELECT id FROM zp_tickets
+                WHERE projectId = :project_id
+                  AND headline = :headline
+                  AND status <> -1
+                  AND ".implode(' AND ', $conditions)."
+                LIMIT 1";
+        $st = $pdo->prepare($sql);
+        $st->execute($params);
+        $row = $st->fetch(\PDO::FETCH_ASSOC);
+        $st->closeCursor();
+
+        if (!$row || empty($row['id'])) {
+            return null;
+        }
+
+        return (int)$row['id'];
+    }
+
     public function getTaskMapByClickupId(int $configId, string $clickupTaskId): ?array
     {
         $pdo = $this->db->pdo();
